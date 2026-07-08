@@ -1,6 +1,5 @@
-
 use ludi::run;
 
-fn main(){
+fn main() {
     run().unwrap();
 }
