@@ -3,6 +3,8 @@ use winit::event_loop::EventLoop;
 mod app;
 mod camera;
 mod instance;
+mod model;
+mod resources;
 mod state;
 mod texture;
 mod vertex;

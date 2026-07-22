@@ -5,9 +5,11 @@ use wgpu::util::DeviceExt;
 use winit::{event_loop::ActiveEventLoop, keyboard::KeyCode, window::Window};
 
 use crate::camera::{Camera, CameraController, CameraUniform};
-use crate::instance::{INSTANCE_DISPLACEMENT, Instance, InstanceRaw, NUM_INSTANCES_PER_ROW};
+use crate::instance::{Instance, InstanceRaw, NUM_INSTANCES_PER_ROW};
+use crate::model::{DrawModel, Model, ModelVertex, Vertex};
+use crate::resources::load_model;
 use crate::texture::Texture;
-use crate::vertex::{INDICES, VERTICES, Vertex};
+use crate::vertex::{INDICES, VERTICES};
 
 pub struct State {
     window: Arc<Window>,
@@ -26,6 +28,7 @@ pub struct State {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     camera_controller: CameraController,
+    obj_model: Model,
     instances: Vec<Instance>,
     instance_buffer: wgpu::Buffer,
     depth_texture: Texture,
@@ -183,14 +186,14 @@ impl State {
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
         });
 
+        const SPACE_BETWEEN: f32 = 3.0;
         let instances = (0..NUM_INSTANCES_PER_ROW)
             .flat_map(|z| {
                 (0..NUM_INSTANCES_PER_ROW).map(move |x| {
-                    let position = cgmath::Vector3 {
-                        x: x as f32,
-                        y: 0.0,
-                        z: z as f32,
-                    } - INSTANCE_DISPLACEMENT;
+                    let x = SPACE_BETWEEN * (x as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+                    let z = SPACE_BETWEEN * (z as f32 - NUM_INSTANCES_PER_ROW as f32 / 2.0);
+
+                    let position = cgmath::Vector3 { x, y: 0.0, z };
 
                     let rotation = if position.is_zero() {
                         cgmath::Quaternion::from_axis_angle(
@@ -232,7 +235,7 @@ impl State {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
-                buffers: &[Vertex::desc(), InstanceRaw::desc()],
+                buffers: &[ModelVertex::desc(), InstanceRaw::desc()],
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
@@ -269,6 +272,10 @@ impl State {
             cache: None,
         });
 
+        let obj_model = load_model("cube.obj", &device, &queue, &texture_bind_group_layout)
+            .await
+            .unwrap();
+
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
             contents: bytemuck::cast_slice(VERTICES),
@@ -303,6 +310,7 @@ impl State {
             instances,
             instance_buffer,
             depth_texture,
+            obj_model,
         })
     }
 
@@ -382,6 +390,9 @@ impl State {
                 multiview_mask: None,
             });
 
+            let mesh = &self.obj_model.meshes[0];
+            let material = &self.obj_model.materials[mesh.material];
+
             render_pass.set_pipeline(&self.render_pipeline);
 
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
@@ -392,6 +403,13 @@ impl State {
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
             render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _);
+
+            render_pass.draw_mesh_instanced(
+                mesh,
+                material,
+                0..self.instances.len() as u32,
+                &self.camera_bind_group,
+            );
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
